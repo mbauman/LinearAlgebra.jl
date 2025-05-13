@@ -477,14 +477,14 @@ Base._any(f, A::Adjoint, ::Colon) = Base._any(f∘adjoint, parent(A), :)
 Base._all(f, A::Transpose, ::Colon) = Base._all(f∘transpose, parent(A), :)
 Base._all(f, A::Adjoint, ::Colon) = Base._all(f∘adjoint, parent(A), :)
 # sum(A'; dims)
-Base.mapreducedim!(f, op::CommutativeOps, B::AbstractArray, A::TransposeAbsMat) =
-    (Base.mapreducedim!(f∘transpose, op, switch_dim12(B), parent(A)); B)
-Base.mapreducedim!(f, op::CommutativeOps, B::AbstractArray, A::AdjointAbsMat) =
-    (Base.mapreducedim!(f∘adjoint, op, switch_dim12(B), parent(A)); B)
-Base.mapreducedim!(f::typeof(identity), op::Union{typeof(*),typeof(Base.mul_prod)}, B::AbstractArray, A::TransposeAbsMat{<:Union{Real,Complex}}) =
-    (Base.mapreducedim!(f∘transpose, op, switch_dim12(B), parent(A)); B)
-Base.mapreducedim!(f::typeof(identity), op::Union{typeof(*),typeof(Base.mul_prod)}, B::AbstractArray, A::AdjointAbsMat{<:Union{Real,Complex}}) =
-    (Base.mapreducedim!(f∘adjoint, op, switch_dim12(B), parent(A)); B)
+Base.mapreduce!(f, op::CommutativeOps, B::AbstractArray, A::TransposeAbsMat) =
+    (Base.mapreduce!(f∘transpose, op, switch_dim12(B), parent(A)); B)
+Base.mapreduce!(f, op::CommutativeOps, B::AbstractArray, A::AdjointAbsMat) =
+    (Base.mapreduce!(f∘adjoint, op, switch_dim12(B), parent(A)); B)
+Base.mapreduce!(f::typeof(identity), op::Union{typeof(*),typeof(Base.mul_prod)}, B::AbstractArray, A::TransposeAbsMat{<:Union{Real,Complex}}) =
+    (Base.mapreduce!(f∘transpose, op, switch_dim12(B), parent(A)); B)
+Base.mapreduce!(f::typeof(identity), op::Union{typeof(*),typeof(Base.mul_prod)}, B::AbstractArray, A::AdjointAbsMat{<:Union{Real,Complex}}) =
+    (Base.mapreduce!(f∘adjoint, op, switch_dim12(B), parent(A)); B)
 
 switch_dim12(B::AbstractVector) = permutedims(B)
 switch_dim12(B::AbstractVector{<:Number}) = transpose(B) # avoid allocs due to permutedims

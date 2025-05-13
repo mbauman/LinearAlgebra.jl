@@ -943,78 +943,47 @@ function SymTridiagonal{T}(M::Tridiagonal) where T
     end
 end
 
-Base._sum(A::Tridiagonal, ::Colon) = sum(A.d) + sum(A.dl) + sum(A.du)
-function Base._sum(A::SymTridiagonal, ::Colon)
-    se = sum(_evview(A))
-    symmetric(sum(A.dv), :U) + se + transpose(se)
+function Base.mapreduce_kernel(f::typeof(identity), op::Union{typeof(+), typeof(Base.add_sum)}, A::Tridiagonal, init, inds::CartesianIndices{2})
+    if inds == CartesianIndices(A)
+        return op(op(mapreduce(f, op, A.du; init), mapreduce(f, op, A.d; init)), mapreduce(f, op, A.dl; init))
+    elseif length(inds) == 1
+        return Base._mapreduce_start(f, op, A, init, A[first(inds)])
+    end
+    is, js = inds.indices
+    # get the diagonal
+    d1, dN = max(first(is), first(js)), min(last(is), last(js))
+    if d1 > dN
+        r = Base._mapreduce_start(f, op, A, init, diagzero(A, first(inds)))
+    else
+        r = Base.mapreduce_kernel(f, op, A.d, init, d1:dN)
+    end
+    # and the off-diagonals
+    u1, uN = max(first(is), first(js)-1), min(last(is), last(js)-1)
+    l1, lN = max(first(is)-1, first(js)), min(last(is)-1, last(js))
+    u1 <= uN && (r = op(r, Base.mapreduce_kernel(f, op, A.du, init, u1:uN)))
+    l1 <= lN && (r = op(r, Base.mapreduce_kernel(f, op, A.dl, init, l1:lN)))
+    return r
 end
 
-function Base._sum(A::Tridiagonal, dims::Integer)
-    res = Base.reducedim_initarray(A, dims, zero(eltype(A)))
-    n = length(A.d)
-    if n == 0
-        return res
-    elseif n == 1
-        res[1] = A.d[1]
-        return res
+function Base.mapreduce_kernel(f::typeof(identity), op::Union{typeof(+), typeof(Base.add_sum)}, A::SymTridiagonal, init, inds::CartesianIndices{2})
+    if inds == CartesianIndices(A)
+        se = _evview(A)
+        return op(op(symmetric(mapreduce(f, op, A.dv; init), :U), mapreduce(f, op, se; init)), transpose(mapreduce(f, op, se; init)))
     end
-    @inbounds begin
-        if dims == 1
-            res[1] = A.dl[1] + A.d[1]
-            for i = 2:n-1
-                res[i] = A.dl[i] + A.d[i] + A.du[i-1]
-            end
-            res[n] = A.d[n] + A.du[n-1]
-        elseif dims == 2
-            res[1] = A.d[1] + A.du[1]
-            for i = 2:n-1
-                res[i] = A.dl[i-1] + A.d[i] + A.du[i]
-            end
-            res[n] = A.dl[n-1] + A.d[n]
-        elseif dims >= 3
-            for i = 1:n-1
-                res[i,i+1] = A.du[i]
-                res[i,i]   = A.d[i]
-                res[i+1,i] = A.dl[i]
-            end
-            res[n,n] = A.d[n]
-        end
+    is, js = inds.indices
+    # get the diagonal
+    d1, dN = max(first(is), first(js)), min(last(is), last(js))
+    if d1 > dN
+        r = Base._mapreduce_start(f, op, A, init, diagzero(A, first(inds)))
+    else
+        r = symmetric(Base.mapreduce_kernel(f, op, A.dv, init, d1:dN), :U)
     end
-    res
-end
-
-function Base._sum(A::SymTridiagonal, dims::Integer)
-    res = Base.reducedim_initarray(A, dims, zero(eltype(A)))
-    n = length(A.dv)
-    if n == 0
-        return res
-    elseif n == 1
-        res[1] = A.dv[1]
-        return res
-    end
-    @inbounds begin
-        if dims == 1
-            res[1] = transpose(A.ev[1]) + symmetric(A.dv[1], :U)
-            for i = 2:n-1
-                res[i] = transpose(A.ev[i]) + symmetric(A.dv[i], :U) + A.ev[i-1]
-            end
-            res[n] = symmetric(A.dv[n], :U) + A.ev[n-1]
-        elseif dims == 2
-            res[1] = symmetric(A.dv[1], :U) + A.ev[1]
-            for i = 2:n-1
-                res[i] = transpose(A.ev[i-1]) + symmetric(A.dv[i], :U) + A.ev[i]
-            end
-            res[n] = transpose(A.ev[n-1]) + symmetric(A.dv[n], :U)
-        elseif dims >= 3
-            for i = 1:n-1
-                res[i,i+1] = A.ev[i]
-                res[i,i]   = symmetric(A.dv[i], :U)
-                res[i+1,i] = transpose(A.ev[i])
-            end
-            res[n,n] = symmetric(A.dv[n], :U)
-        end
-    end
-    res
+    # and the off-diagonals
+    u1, uN = max(first(is), first(js)-1), min(last(is), last(js)-1)
+    l1, lN = max(first(is)-1, first(js)), min(last(is)-1, last(js))
+    u1 <= uN && (r = op(r, Base.mapreduce_kernel(f, op, A.ev, init, u1:uN)))
+    l1 <= lN && (r = op(r, transpose(Base.mapreduce_kernel(f, op, A.ev, init, l1:lN))))
+    return r
 end
 
 function dot(x::AbstractVector, A::Tridiagonal, y::AbstractVector)

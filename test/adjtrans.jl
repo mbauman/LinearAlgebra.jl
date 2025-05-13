@@ -659,9 +659,9 @@ end
         @test reduction(imag, adjtrans(mat), dims=2) ≈ reduction(imag, copy(adjtrans(mat)), dims=2)
         @test reduction(imag, adjtrans(mat), dims=(1,2)) ≈ reduction(imag, copy(adjtrans(mat)), dims=(1,2))
 
-        @test Base.mapreducedim!(imag, op, rd1, adjtrans(mat)) ≈ Base.mapreducedim!(imag, op, rd1, copy(adjtrans(mat)))
-        @test Base.mapreducedim!(imag, op, rd2, adjtrans(mat)) ≈ Base.mapreducedim!(imag, op, rd2, copy(adjtrans(mat)))
-        @test Base.mapreducedim!(imag, op, rd3, adjtrans(mat)) ≈ Base.mapreducedim!(imag, op, rd3, copy(adjtrans(mat)))
+        @test Base.mapreduce!(imag, op, rd1, adjtrans(mat)) ≈ Base.mapreduce!(imag, op, rd1, copy(adjtrans(mat)))
+        @test Base.mapreduce!(imag, op, rd2, adjtrans(mat)) ≈ Base.mapreduce!(imag, op, rd2, copy(adjtrans(mat)))
+        @test Base.mapreduce!(imag, op, rd3, adjtrans(mat)) ≈ Base.mapreduce!(imag, op, rd3, copy(adjtrans(mat)))
 
         op in (max, min) && continue
         mat = [rand(T,2,2) for _ in 1:3, _ in 1:5]

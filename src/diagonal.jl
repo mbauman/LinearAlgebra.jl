@@ -1193,19 +1193,17 @@ function getproperty(C::Cholesky{<:Any,<:Diagonal}, d::Symbol)
     end
 end
 
-Base._sum(A::Diagonal, ::Colon) = sum(A.diag)
-function Base._sum(A::Diagonal, dims::Integer)
-    res = Base.reducedim_initarray(A, dims, zero(eltype(A)))
-    if dims <= 2
-        for i = 1:length(A.diag)
-            @inbounds res[i] = A.diag[i]
-        end
-    else
-        for i = 1:length(A.diag)
-            @inbounds res[i,i] = A.diag[i]
-        end
+function Base.mapreduce_kernel(f::typeof(identity), op::Union{typeof(+), typeof(Base.add_sum)}, A::Diagonal, init, inds::CartesianIndices{2})
+    if inds == CartesianIndices(A)
+        return mapreduce(f, op, A.diag; init)
     end
-    res
+    is, js = inds.indices
+    d1, dN = max(first(is), first(js)), min(last(is), last(js))
+    if d1 > dN
+        return Base._mapreduce_start(f, op, A, init, diagzero(A, first(inds)))
+    else
+        return Base.mapreduce_kernel(f, op, A.diag, init, d1:dN)
+    end
 end
 
 function logabsdet(A::Diagonal)

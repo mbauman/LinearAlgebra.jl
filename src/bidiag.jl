@@ -1530,43 +1530,28 @@ function eigvecs(M::Bidiagonal{T}) where T
 end
 eigen(M::Bidiagonal) = Eigen(eigvals(M), eigvecs(M))
 
-Base._sum(A::Bidiagonal, ::Colon) = sum(A.dv) + sum(A.ev)
-function Base._sum(A::Bidiagonal, dims::Integer)
-    res = Base.reducedim_initarray(A, dims, zero(eltype(A)))
-    n = length(A.dv)
-    if n == 0
-        # Just to be sure. This shouldn't happen since there is a check whether
-        # length(A.dv) == length(A.ev) + 1 in the constructor.
-        return res
-    elseif n == 1
-        res[1] = A.dv[1]
-        return res
+function Base.mapreduce_kernel(f::typeof(identity), op::Union{typeof(+), typeof(Base.add_sum)}, A::Bidiagonal, init, inds::CartesianIndices{2})
+    if inds == CartesianIndices(A)
+        return op(mapreduce(f, op, A.dv; init), mapreduce(f, op, A.ev; init))
+    elseif length(inds) == 1
+        return Base._mapreduce_start(f, op, A, init, A[first(inds)])
     end
-    @inbounds begin
-        if (dims == 1 && A.uplo == 'U') || (dims == 2 && A.uplo == 'L')
-            res[1] = A.dv[1]
-            for i = 2:length(A.dv)
-                res[i] = A.ev[i-1] + A.dv[i]
-            end
-        elseif (dims == 1 && A.uplo == 'L') || (dims == 2 && A.uplo == 'U')
-            for i = 1:length(A.dv)-1
-                res[i] = A.ev[i] + A.dv[i]
-            end
-            res[end] = A.dv[end]
-        elseif dims >= 3
-            if A.uplo == 'U'
-                for i = 1:length(A.dv)-1
-                    res[i,i]   = A.dv[i]
-                    res[i,i+1] = A.ev[i]
-                end
-            else
-                for i = 1:length(A.dv)-1
-                    res[i,i]   = A.dv[i]
-                    res[i+1,i] = A.ev[i]
-                end
-            end
-            res[end,end] = A.dv[end]
-        end
+    is, js = inds.indices
+    # get the diagonal
+    d1, dN = max(first(is), first(js)), min(last(is), last(js))
+    if d1 > dN
+        r = Base._mapreduce_start(f, op, A, init, diagzero(A, first(inds)))
+    else
+        r = Base.mapreduce_kernel(f, op, A.dv, init, d1:dN)
     end
-    res
+    # and the off-diagonal
+    e1, eN = if A.uplo === 'U'
+        max(first(is), first(js)-1), min(last(is), last(js)-1)
+    else
+        max(first(is)-1, first(js)), min(last(is)-1, last(js))
+    end
+    if e1 <= eN
+        r = op(r, Base.mapreduce_kernel(f, op, A.ev, init, e1:eN))
+    end
+    return r
 end

@@ -1515,4 +1515,18 @@ end
     @test_throws BoundsError D[LinearAlgebra.BandIndex(0,size(D,1)+1)]
 end
 
+@testset "mapreduce kernel" begin
+    for f in (x->rand(x), x->[rand(2, 2) for _ in 1:x],
+              x->rand(ComplexF64, x), x->[rand(ComplexF64, 2, 2) for _ in 1:x],)
+        for A in Any[Diagonal(f(5)), Bidiagonal(f(5), f(4), :U), Bidiagonal(f(5), f(4), :L), Tridiagonal(f(4), f(5), f(4)), SymTridiagonal(f(5), f(4))]
+            for i1 in 1:5, j1 in 1:5
+                for i2 in i1:5, j2 in j1:5
+                    CI = CartesianIndices((i1:i2, j1:j2))
+                    @test sum(A[CI]) ≈ sum(@view A[CI]) ≈ Base.mapreduce_kernel(identity, +, A, Base._InitialValue(), CI)
+                end
+            end
+        end
+    end
+end
+
 end # module TestDiagonal
