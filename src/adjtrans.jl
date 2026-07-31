@@ -459,16 +459,16 @@ Broadcast.broadcast_preserving_zero_d(f, tvs::Union{Number,Adjoint{<:Any,<:Trans
 
 
 ### reductions
-# faster to sum the Array than to work through the wrapper (but only in commutative reduction ops as in Base/permuteddimsarray.jl)
-Base._mapreduce_dim(f, op::CommutativeOps, init::Base._InitialValue, A::Transpose, dims::Colon) =
-    Base._mapreduce_dim(f∘transpose, op, init, parent(A), dims)
-Base._mapreduce_dim(f, op::CommutativeOps, init::Base._InitialValue, A::Adjoint, dims::Colon) =
-    Base._mapreduce_dim(f∘adjoint, op, init, parent(A), dims)
+# Whole array reductions can (sometimes) be optimized by using the parent array, but only if the operation is commutative
+Base.mapreducedim(f, op::CommutativeOps, A::Transpose, init, ::Colon) =
+    Base.mapreducedim(f∘transpose, op, parent(A), init, :)
+Base.mapreducedim(f, op::CommutativeOps, A::Adjoint, init, ::Colon) =
+    Base.mapreducedim(f∘adjoint, op, parent(A), init, :)
 # in prod, use fast path only in the commutative case to avoid surprises
-Base._mapreduce_dim(f::typeof(identity), op::Union{typeof(*),typeof(Base.mul_prod)}, init::Base._InitialValue, A::Transpose{<:Union{Real,Complex}}, dims::Colon) =
-    Base._mapreduce_dim(f∘transpose, op, init, parent(A), dims)
-Base._mapreduce_dim(f::typeof(identity), op::Union{typeof(*),typeof(Base.mul_prod)}, init::Base._InitialValue, A::Adjoint{<:Union{Real,Complex}}, dims::Colon) =
-    Base._mapreduce_dim(f∘adjoint, op, init, parent(A), dims)
+Base.mapreducedim(f::typeof(identity), op::Union{typeof(*),typeof(Base.mul_prod)}, A::Transpose{<:Union{Real,Complex}}, init, ::Colon) =
+    Base.mapreducedim(f∘transpose, op, parent(A), init, :)
+Base.mapreducedim(f::typeof(identity), op::Union{typeof(*),typeof(Base.mul_prod)}, A::Adjoint{<:Union{Real,Complex}}, init, ::Colon) =
+    Base.mapreducedim(f∘adjoint, op, parent(A), init, :)
 # count allows for optimization only if the parent array has Bool eltype
 Base._count(::typeof(identity), A::Transpose{Bool}, ::Colon, init) = Base._count(identity, parent(A), :, init)
 Base._count(::typeof(identity), A::Adjoint{Bool}, ::Colon, init) = Base._count(identity, parent(A), :, init)
@@ -476,15 +476,15 @@ Base._any(f, A::Transpose, ::Colon) = Base._any(f∘transpose, parent(A), :)
 Base._any(f, A::Adjoint, ::Colon) = Base._any(f∘adjoint, parent(A), :)
 Base._all(f, A::Transpose, ::Colon) = Base._all(f∘transpose, parent(A), :)
 Base._all(f, A::Adjoint, ::Colon) = Base._all(f∘adjoint, parent(A), :)
-# sum(A'; dims)
-Base.mapreduce!(f, op::CommutativeOps, B::AbstractArray, A::TransposeAbsMat) =
-    (Base.mapreduce!(f∘transpose, op, switch_dim12(B), parent(A)); B)
-Base.mapreduce!(f, op::CommutativeOps, B::AbstractArray, A::AdjointAbsMat) =
-    (Base.mapreduce!(f∘adjoint, op, switch_dim12(B), parent(A)); B)
-Base.mapreduce!(f::typeof(identity), op::Union{typeof(*),typeof(Base.mul_prod)}, B::AbstractArray, A::TransposeAbsMat{<:Union{Real,Complex}}) =
-    (Base.mapreduce!(f∘transpose, op, switch_dim12(B), parent(A)); B)
-Base.mapreduce!(f::typeof(identity), op::Union{typeof(*),typeof(Base.mul_prod)}, B::AbstractArray, A::AdjointAbsMat{<:Union{Real,Complex}}) =
-    (Base.mapreduce!(f∘adjoint, op, switch_dim12(B), parent(A)); B)
+# In-place dimensional reductions can similarly be optimized, but we must also swap the leading 2 dimensions of the output array
+Base.mapreduce!(f, op::CommutativeOps, B::AbstractArray, A::TransposeAbsMat; init=Base._InitialValue(), update::Bool=false) =
+    (Base.mapreduce!(f∘transpose, op, switch_dim12(B), parent(A); init, update); B)
+Base.mapreduce!(f, op::CommutativeOps, B::AbstractArray, A::AdjointAbsMat; init=Base._InitialValue(), update::Bool=false) =
+    (Base.mapreduce!(f∘adjoint, op, switch_dim12(B), parent(A); init, update); B)
+Base.mapreduce!(f::typeof(identity), op::Union{typeof(*),typeof(Base.mul_prod)}, B::AbstractArray, A::TransposeAbsMat{<:Union{Real,Complex}}; init=Base._InitialValue(), update::Bool=false) =
+    (Base.mapreduce!(f∘transpose, op, switch_dim12(B), parent(A); init, update); B)
+Base.mapreduce!(f::typeof(identity), op::Union{typeof(*),typeof(Base.mul_prod)}, B::AbstractArray, A::AdjointAbsMat{<:Union{Real,Complex}}; init=Base._InitialValue(), update::Bool=false) =
+    (Base.mapreduce!(f∘adjoint, op, switch_dim12(B), parent(A); init, update); B)
 
 switch_dim12(B::AbstractVector) = permutedims(B)
 switch_dim12(B::AbstractVector{<:Number}) = transpose(B) # avoid allocs due to permutedims

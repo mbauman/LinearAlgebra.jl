@@ -689,6 +689,32 @@ end
     @test mapreduce(string, *, [1 2; 3 4]') == mapreduce(string, *, copy([1 2; 3 4]')) == "1234"
 end
 
+@testset "in-place reductions pass keyword arguments: $adjtrans" for adjtrans in (transpose, adjoint)
+    # `sum!` & friends call `Base.mapreduce!` with keyword arguments, which only
+    # dispatches to methods whose keyword signature accepts them; these must reach
+    # the forwarding specializations (or at least remain correct if they don't)
+    for T in (Float64, ComplexF64)
+        mat = rand(T, 3, 5)
+        dense = copy(adjtrans(mat))
+        rd1 = zeros(T, 1, 3)
+        rd2 = zeros(T, 5, 1)
+        @test sum!(rd1, adjtrans(mat)) ≈ sum(dense; dims=1)
+        @test sum!(rd2, adjtrans(mat)) ≈ sum(dense; dims=2)
+        # `init=false` must accumulate onto the destination's existing values
+        fill!(rd1, T(7))
+        @test sum!(rd1, adjtrans(mat); init=false) ≈ T(7) .+ sum(dense; dims=1)
+        fill!(rd2, T(7))
+        @test prod!(rd2, adjtrans(mat); init=false) ≈ T(7) .* prod(dense; dims=2)
+        @test maximum!(abs2, fill(typemin(real(T)), 1, 3), adjtrans(mat)) ≈ maximum(abs2, dense; dims=1)
+        @test minimum!(abs2, fill(typemax(real(T)), 5, 1), adjtrans(mat)) ≈ minimum(abs2, dense; dims=2)
+        @test count!(x -> abs2(x) > 0.5, zeros(Int, 1, 3), adjtrans(mat)) == count(x -> abs2(x) > 0.5, dense; dims=1)
+    end
+    matb = rand(Bool, 3, 5)
+    denseb = copy(adjtrans(matb))
+    @test any!(fill(false, 1, 3), adjtrans(matb)) == any(denseb; dims=1)
+    @test all!(fill(true, 1, 3), adjtrans(matb)) == all(denseb; dims=1)
+end
+
 @testset "trace" begin
     for T in (Float64, ComplexF64), t in (adjoint, transpose)
         A = randn(T, 10, 10)
