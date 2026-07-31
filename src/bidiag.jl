@@ -1468,32 +1468,6 @@ function eigvecs(M::Bidiagonal{T}; sortby=eigsortby) where T
 end
 eigen(M::Bidiagonal; sortby=eigsortby) = Eigen(sorteig!(eigvals(M; sortby=nothing), eigvecs(M; sortby=nothing), sortby)...)
 
-function Base.mapreduce_kernel(f::typeof(identity), op::Union{typeof(+), typeof(Base.add_sum)}, A::Bidiagonal, init, inds::CartesianIndices{2})
-    if inds == CartesianIndices(A)
-        return op(mapreduce(f, op, A.dv; init), mapreduce(f, op, A.ev; init))
-    elseif length(inds) == 1
-        return Base._mapreduce_start(f, op, A, init, A[first(inds)])
-    end
-    is, js = inds.indices
-    # get the diagonal
-    d1, dN = max(first(is), first(js)), min(last(is), last(js))
-    if d1 > dN
-        r = Base._mapreduce_start(f, op, A, init, diagzero(A, first(inds)))
-    else
-        r = Base.mapreduce_kernel(f, op, A.dv, init, d1:dN)
-    end
-    # and the off-diagonal
-    e1, eN = if A.uplo === 'U'
-        max(first(is), first(js)-1), min(last(is), last(js)-1)
-    else
-        max(first(is)-1, first(js)), min(last(is)-1, last(js))
-    end
-    if e1 <= eN
-        r = op(r, Base.mapreduce_kernel(f, op, A.ev, init, e1:eN))
-    end
-    return r
-end
-
 function fillband!(B::Bidiagonal, x, l, u)
     if l > u
         return B

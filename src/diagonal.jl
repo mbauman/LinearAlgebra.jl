@@ -1251,19 +1251,6 @@ function getproperty(C::Cholesky{<:Any,<:Diagonal}, d::Symbol)
     end
 end
 
-function Base.mapreduce_kernel(f::typeof(identity), op::Union{typeof(+), typeof(Base.add_sum)}, A::Diagonal, init, inds::CartesianIndices{2})
-    if inds == CartesianIndices(A)
-        return mapreduce(f, op, A.diag; init)
-    end
-    is, js = inds.indices
-    d1, dN = max(first(is), first(js)), min(last(is), last(js))
-    if d1 > dN
-        return Base._mapreduce_start(f, op, A, init, diagzero(A, first(inds)))
-    else
-        return Base.mapreduce_kernel(f, op, A.diag, init, d1:dN)
-    end
-end
-
 function logabsdet(A::Diagonal)
      mapreduce(x -> (log(abs(x)), sign(x)), ((d1, s1), (d2, s2)) -> (d1 + d2, s1 * s2),
                A.diag)
