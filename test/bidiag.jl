@@ -7,25 +7,16 @@ isdefined(Main, :pruned_old_LA) || @eval Main include("prune_old_LA.jl")
 using Test, LinearAlgebra, Random
 using LinearAlgebra: BlasReal, BlasFloat
 
-const BASE_TEST_PATH = joinpath(Sys.BINDIR, "..", "share", "julia", "test")
+const TESTDIR = joinpath(dirname(pathof(LinearAlgebra)), "..", "test")
+const TESTHELPERS = joinpath(TESTDIR, "testhelpers", "testhelpers.jl")
+isdefined(Main, :LinearAlgebraTestHelpers) || Base.include(Main, TESTHELPERS)
 
-isdefined(Main, :Quaternions) || @eval Main include(joinpath($(BASE_TEST_PATH), "testhelpers", "Quaternions.jl"))
-using .Main.Quaternions
-
-isdefined(Main, :InfiniteArrays) || @eval Main include(joinpath($(BASE_TEST_PATH), "testhelpers", "InfiniteArrays.jl"))
-using .Main.InfiniteArrays
-
-isdefined(Main, :FillArrays) || @eval Main include(joinpath($(BASE_TEST_PATH), "testhelpers", "FillArrays.jl"))
-using .Main.FillArrays
-
-isdefined(Main, :OffsetArrays) || @eval Main include(joinpath($(BASE_TEST_PATH), "testhelpers", "OffsetArrays.jl"))
-using .Main.OffsetArrays
-
-isdefined(Main, :SizedArrays) || @eval Main include(joinpath($(BASE_TEST_PATH), "testhelpers", "SizedArrays.jl"))
-using .Main.SizedArrays
-
-isdefined(Main, :ImmutableArrays) || @eval Main include(joinpath($(BASE_TEST_PATH), "testhelpers", "ImmutableArrays.jl"))
-using .Main.ImmutableArrays
+using Main.LinearAlgebraTestHelpers.Quaternions
+using Main.LinearAlgebraTestHelpers.InfiniteArrays
+using Main.LinearAlgebraTestHelpers.FillArrays
+using Main.LinearAlgebraTestHelpers.OffsetArrays
+using Main.LinearAlgebraTestHelpers.SizedArrays
+using Main.LinearAlgebraTestHelpers.ImmutableArrays
 
 include("testutils.jl") # test_approx_eq_modphase
 
@@ -56,6 +47,8 @@ Random.seed!(1)
             # from vectors
             ubd = Bidiagonal(x, y, :U)
             lbd = Bidiagonal(x, y, :L)
+            @test LinearAlgebra.uplo(ubd) == :U
+            @test LinearAlgebra.uplo(lbd) == :L
             @test ubd != lbd || x === dv0
             @test ubd.dv === x
             @test lbd.ev === y
@@ -410,8 +403,8 @@ Random.seed!(1)
 
         @testset "Eigensystems" begin
             if relty <: AbstractFloat
-                d1, v1 = eigen(T)
-                d2, v2 = eigen(map(elty<:Complex ? ComplexF64 : Float64,Tfull), sortby=nothing)
+                d1, v1 = eigen(T; sortby=nothing)
+                d2, v2 = eigen(map(elty<:Complex ? ComplexF64 : Float64,Tfull); sortby=nothing)
                 @test (uplo === :U ? d1 : reverse(d1)) ≈ d2
                 if elty <: Real
                     test_approx_eq_modphase(v1, uplo === :U ? v2 : v2[:,n:-1:1])
@@ -805,9 +798,15 @@ end
     @test convert(AbstractMatrix{Float64}, Bu)::Bidiagonal{Float64,ImmutableArray{Float64,1,Array{Float64,1}}} == Bu
     @test convert(AbstractArray{Float64}, Bl)::Bidiagonal{Float64,ImmutableArray{Float64,1,Array{Float64,1}}} == Bl
     @test convert(AbstractMatrix{Float64}, Bl)::Bidiagonal{Float64,ImmutableArray{Float64,1,Array{Float64,1}}} == Bl
+
+    @testset "convert to Bidiagonal from same type" begin
+        @test convert(typeof(Bu), Bu) === Bu
+        @test convert(Bidiagonal{eltype(Bu)}, Bu) === Bu
+        @test convert(Bidiagonal, Bu) === Bu
+    end
 end
 
-@testset "block-bidiagonal matrix indexing" begin
+@testset "block-bidiagonal matrix" begin
     dv = [ones(4,3), ones(2,2).*2, ones(2,3).*3, ones(4,4).*4]
     evu = [ones(4,2), ones(2,3).*2, ones(2,4).*3]
     evl = [ones(2,3), ones(2,2).*2, ones(4,3).*3]
@@ -846,6 +845,18 @@ end
         B = Bidiagonal(fill(s,4), fill(s,3), :U)
         @test @inferred(B[2,1]) isa typeof(s)
         @test all(iszero, B[2,1])
+    end
+
+    @testset "adjoint/transpose" begin
+        m = rand(Int, 2, 2)
+        for uplo in [:U, :L]
+            B = Bidiagonal(fill(m,4), fill(m,3), uplo)
+            A = Array{Matrix{Int}}(B)
+            @testset for f in (adjoint, transpose)
+                @test f(B) == f(A)
+                @test f(f(B)) == B
+            end
+        end
     end
 end
 
@@ -1141,29 +1152,19 @@ end
 end
 
 @testset "opnorms" begin
-    B = Bidiagonal([1,-2,3,-4], [1,2,3], 'U')
-
-    @test opnorm(B, 1) == opnorm(Matrix(B), 1)
-    @test opnorm(B, 2) ≈ opnorm(Matrix(B), 2)
-    @test opnorm(B, Inf) == opnorm(Matrix(B), Inf)
-
-    B = Bidiagonal([1,-2,3,-4], [1,2,3], 'L')
-
-    @test opnorm(B, 1) == opnorm(Matrix(B), 1)
-    @test opnorm(B, 2) ≈ opnorm(Matrix(B), 2)
-    @test opnorm(B, Inf) == opnorm(Matrix(B), Inf)
-
-    B = Bidiagonal([2], Int[], 'L')
-
-    @test opnorm(B, 1) == opnorm(Matrix(B), 1)
-    @test opnorm(B, 2) ≈ opnorm(Matrix(B), 2)
-    @test opnorm(B, Inf) == opnorm(Matrix(B), Inf)
-
-    B = Bidiagonal([2], Int[], 'U')
-
-    @test opnorm(B, 1) == opnorm(Matrix(B), 1)
-    @test opnorm(B, 2) ≈ opnorm(Matrix(B), 2)
-    @test opnorm(B, Inf) == opnorm(Matrix(B), Inf)
+    for B in (Bidiagonal([1,-2,3,-4], [1,2,3], 'U'),
+                Bidiagonal([1,-2,3,-4], [1,2,3], 'L'),
+                Bidiagonal([2], Int[], 'L'),
+                Bidiagonal([2], Int[], 'U'),
+                Bidiagonal([1,-2], [-4], 'U'),
+                Bidiagonal([1,-2], [-4], 'L'),
+                Bidiagonal([100, 2, 3], [1, 1], 'U'),  # first column dominates 1-norm
+                Bidiagonal([100, 2, 3], [1, 1], 'L'),  # first row dominates Inf-norm
+            )
+        @test opnorm(B, 1) == opnorm(Matrix(B), 1)
+        @test opnorm(B, 2) ≈ opnorm(Matrix(B), 2)
+        @test opnorm(B, Inf) == opnorm(Matrix(B), Inf)
+    end
 end
 
 @testset "convert to Bidiagonal" begin
@@ -1226,6 +1227,85 @@ end
 
     @test_throws BoundsError B[LinearAlgebra.BandIndex(size(B,1),1)]
     @test_throws BoundsError B[LinearAlgebra.BandIndex(0,size(B,1)+1)]
+end
+
+@testset "lazy adjtrans" begin
+    B = Bidiagonal(fill([1 2; 3 4], 3), fill([5 6; 7 8], 2), :U)
+    m = [2 4; 6 8]
+    for op in (transpose, adjoint)
+        C = op(B)
+        el = op(m)
+        C[1,1] = el
+        @test B[1,1] == m
+        C[2,1] = el
+        @test B[1,2] == m
+        @test (@allocated op(B)) == 0
+        @test (@allocated op(op(B))) == 0
+    end
+end
+
+@testset "fillband!" begin
+    @testset "uplo = :U" begin
+        B = Bidiagonal(zeros(4), zeros(3), :U)
+        LinearAlgebra.fillband!(B, 2, 1, 1)
+        @test all(==(2), diagview(B,1))
+        LinearAlgebra.fillband!(B, 3, 0, 0)
+        @test all(==(3), diagview(B,0))
+        @test all(==(2), diagview(B,1))
+        LinearAlgebra.fillband!(B, 4, 0, 1)
+        @test all(==(4), diagview(B,0))
+        @test all(==(4), diagview(B,1))
+        @test_throws ArgumentError LinearAlgebra.fillband!(B, 3, -1, 0)
+
+        LinearAlgebra.fillstored!(B, 1)
+        LinearAlgebra.fillband!(B, 0, -3, 3)
+        @test iszero(B)
+        LinearAlgebra.fillband!(B, 0, -10, 10)
+        @test iszero(B)
+        LinearAlgebra.fillstored!(B, 1)
+        B2 = copy(B)
+        LinearAlgebra.fillband!(B, 0, -1, -3)
+        @test B == B2
+        LinearAlgebra.fillband!(B, 0, 10, 10)
+        @test B == B2
+    end
+
+    @testset "uplo = :L" begin
+        B = Bidiagonal(zeros(4), zeros(3), :L)
+        LinearAlgebra.fillband!(B, 2, -1, -1)
+        @test all(==(2), diagview(B,-1))
+        LinearAlgebra.fillband!(B, 3, 0, 0)
+        @test all(==(3), diagview(B,0))
+        @test all(==(2), diagview(B,-1))
+        LinearAlgebra.fillband!(B, 4, -1, 0)
+        @test all(==(4), diagview(B,0))
+        @test all(==(4), diagview(B,-1))
+        @test_throws ArgumentError LinearAlgebra.fillband!(B, 3, 0, 1)
+
+        LinearAlgebra.fillstored!(B, 1)
+        LinearAlgebra.fillband!(B, 0, -3, 3)
+        @test iszero(B)
+        LinearAlgebra.fillband!(B, 0, -10, 10)
+        @test iszero(B)
+        LinearAlgebra.fillstored!(B, 1)
+        B2 = copy(B)
+        LinearAlgebra.fillband!(B, 0, -1, -3)
+        @test B == B2
+        LinearAlgebra.fillband!(B, 0, 10, 10)
+        @test B == B2
+    end
+end
+
+@testset "eigenvalue sorting" begin
+    for T in (Float64, ComplexF64, Float16, ComplexF16)
+        B = Bidiagonal(randn(T, 4), randn(T, 3), :U)
+        @test eigvals(B; sortby=nothing) == diag(B)
+        F = eigen(B)
+        @test issorted(F.values, by=LinearAlgebra.eigsortby) #sort by default
+        @test B * F.vectors ≈ F.vectors * Diagonal(F.values)
+        @test F.values == sort!(diag(B), by=LinearAlgebra.eigsortby) == eigvals(B; sortby = LinearAlgebra.eigsortby)
+        @test F.vectors ≈ eigvecs(B; sortby = LinearAlgebra.eigsortby)
+    end
 end
 
 end # module TestBidiagonal

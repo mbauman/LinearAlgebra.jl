@@ -110,8 +110,8 @@ end
 `lu!` is the same as [`lu`](@ref), but saves space by overwriting the
 input `F`, instead of creating a copy.
 
-!!! compat "Julia 1.12"
-    Reusing dense `LU` factorizations in `lu!` require Julia 1.12 or later.
+!!! compat "Julia 1.13"
+    Reusing dense `LU` factorizations in `lu!` require Julia 1.13 or later.
 
 # Examples
 ```jldoctest
@@ -208,7 +208,7 @@ Stacktrace:
 """
 lu!(A::AbstractMatrix, pivot::Union{RowMaximum,NoPivot,RowNonZero} = lupivottype(eltype(A));
     check::Bool = true, allowsingular::Bool = false) = generic_lufact!(A, pivot; check, allowsingular)
-function generic_lufact!(A::AbstractMatrix{T}, pivot::Union{RowMaximum,NoPivot,RowNonZero} = lupivottype(T), ipiv::AbstractVector{BlasInt} = Vector{BlasInt}(undef,min(size(A)...));
+function generic_lufact!(A::AbstractMatrix{T}, pivot::Union{RowMaximum,NoPivot,RowNonZero} = lupivottype(T), ipiv::AbstractVector{BlasInt} = similar(A, BlasInt, min(size(A)...));
                          check::Bool = true, allowsingular::Bool = false) where {T}
     check && LAPACK.chkfinite(A)
     # Extract values
@@ -633,7 +633,7 @@ function lu!(A::Tridiagonal{T,V}, pivot::Union{RowMaximum,NoPivot} = RowMaximum(
     else
         du2 = similar(A.d, max(0, n-2))::V
     end
-    _lu_tridiag!(A.dl, A.d, A.du, du2, Vector{BlasInt}(undef, n), pivot, check, allowsingular)
+    _lu_tridiag!(A.dl, A.d, A.du, du2, similar(A.d, BlasInt, n), pivot, check, allowsingular)
 end
 function lu!(F::LU{<:Any,<:Tridiagonal}, A::Tridiagonal, pivot::Union{RowMaximum,NoPivot} = RowMaximum();
         check::Bool = true, allowsingular::Bool = false)
@@ -652,7 +652,7 @@ end
 
     # Initialize variables
     info = 0
-    fill!(du2, 0)
+    fill!(du2, zero(eltype(du2)))
 
     @inbounds begin
         for i = 1:n

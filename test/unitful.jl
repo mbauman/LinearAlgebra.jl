@@ -6,9 +6,11 @@ using Test, LinearAlgebra, Random
 
 Random.seed!(1234321)
 
-const BASE_TEST_PATH = joinpath(Sys.BINDIR, "..", "share", "julia", "test")
-isdefined(Main, :Furlongs) || @eval Main include(joinpath($(BASE_TEST_PATH), "testhelpers", "Furlongs.jl"))
-using .Main.Furlongs
+const TESTDIR = joinpath(dirname(pathof(LinearAlgebra)), "..", "test")
+const TESTHELPERS = joinpath(TESTDIR, "testhelpers", "testhelpers.jl")
+isdefined(Main, :LinearAlgebraTestHelpers) || Base.include(Main, TESTHELPERS)
+
+using Main.LinearAlgebraTestHelpers.Furlongs
 
 LinearAlgebra.sylvester(a::Furlong,b::Furlong,c::Furlong) = -c / (a + b)
 
@@ -84,7 +86,7 @@ end
         @test U isa AbstractMatrix{<:Union{Real,Complex}}
         @test V isa AbstractMatrix{<:Union{Real,Complex}}
         @test s isa AbstractVector{<:Furlong{1}}
-        E = eigen(Du)
+        E = eigen(Du; sortby=nothing)
         vals, vecs = E
         @test Matrix(E) == Du
         @test vals isa AbstractVector{<:Furlong{1}}
@@ -198,6 +200,23 @@ end
     @test inv(D)::UnitLowerTriangular == Furlong{-1}.(UnitLowerTriangular([1 0; -4 1]))
     b = [Furlong(5), Furlong(8)]
     @test (C \ b)::Vector{<:Furlong{0}} == (D \ b)::Vector{<:Furlong{0}} == Furlong{0}.([5, -12])
+end
+
+@testset "unitful 3-arg *" begin
+    for n in (2, 3, 5)
+        λ = 5
+        A = rand(-10:10, n, n)
+        b = rand(-10:10, n)
+        λu = Furlong{1}(λ)
+        Au = Furlong{1}.(A)
+        bu = Furlong{1}.(b)
+        @test Furlong{3}.(A*A*λ) == Au*Au*λu
+        @test Furlong{3}.(A'*A*λ) == Au'*Au*λu
+        @test Furlong{3}.(A*A'*λ) == Au*Au'*λu
+        @test Furlong{3}.(A'*A'*λ) == Au'*Au'*λu
+        @test Furlong{3}.(A*b*λ) == Au*bu*λu
+        @test Furlong{3}.(A'*b*λ) == Au'*bu*λu
+    end
 end
 
 end # module TestUnitfulLinAlg

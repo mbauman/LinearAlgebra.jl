@@ -8,9 +8,9 @@
 # Generic real type. Any real number type should able to approximate
 # real numbers, and thus be closed under arithmetic operations.
 # Therefore so Int, Complex{Int}, etc. are excluded.
-ClosedReal = T where T <: Union{AbstractFloat, Rational}
+const ClosedReal = T where T <: Union{AbstractFloat, Rational}
 # Similarly, we also use a closed scalar type
-ClosedScalar = Union{T, Complex{T}} where T <: ClosedReal
+const ClosedScalar = Union{T, Complex{T}} where T <: ClosedReal
 ##--------------------------------------------------------------------------------
 
 """
@@ -18,7 +18,9 @@ ClosedScalar = Union{T, Complex{T}} where T <: ClosedReal
 
 Matrix factorization type of the Bunch-Kaufman factorization of a symmetric or
 Hermitian matrix `A` as `P'UDU'P` or `P'LDL'P`, depending on whether the upper
-(the default) or the lower triangle is stored in `A`. If `A` is complex symmetric
+(the default) or the lower triangle is stored in `A`. Here, `U` and `L` are
+respectively upper and lower triangular, `P` is a permutation matrix, and `D`
+is block diagonal with 1-by-1 and 2-by-2 blocks. If `A` is complex symmetric
 then `U'` and `L'` denote the unconjugated transposes, i.e. `transpose(U)` and
 `transpose(L)`, respectively. This is the return type of [`bunchkaufman`](@ref),
 the corresponding matrix factorization function.
@@ -128,7 +130,9 @@ function bunchkaufman!(A::StridedMatrix{<:BlasFloat}, rook::Bool = false; check:
 end
 
 bkcopy_oftype(A, S) = eigencopy_oftype(A, S)
-bkcopy_oftype(A::Symmetric{<:Complex}, S) = Symmetric(copytrito!(similar(parent(A), S, size(A)), A.data, A.uplo), sym_uplo(A.uplo))
+function bkcopy_oftype(A::Symmetric{<:Complex}, S)
+    Symmetric(copytrito!(similar(parent(A), S, size(A)), A.data, A.uplo), _sym_uplo(A.uplo))
+end
 
 """
     bunchkaufman(A, rook::Bool=false; check = true) -> S::BunchKaufman
@@ -136,6 +140,8 @@ bkcopy_oftype(A::Symmetric{<:Complex}, S) = Symmetric(copytrito!(similar(parent(
 Compute the Bunch-Kaufman [^Bunch1977] factorization of a symmetric or
 Hermitian matrix `A` as `P'*U*D*U'*P` or `P'*L*D*L'*P`, depending on
 which triangle is stored in `A`, and return a [`BunchKaufman`](@ref) object.
+Here, `U` and `L` are respectively upper and lower triangular, `P` is a
+permutation matrix, and `D` is block diagonal with 1-by-1 and 2-by-2 blocks.
 Note that if `A` is complex symmetric then `U'` and `L'` denote
 the unconjugated transposes, i.e. `transpose(U)` and `transpose(L)`.
 
@@ -210,6 +216,12 @@ bunchkaufman(A::AbstractMatrix{T}, rook::Bool=false; check::Bool = true) where {
 BunchKaufman{T}(B::BunchKaufman) where {T} =
     BunchKaufman(convert(Matrix{T}, B.LD), B.ipiv, B.uplo, B.symmetric, B.rook, B.info)
 Factorization{T}(B::BunchKaufman) where {T} = BunchKaufman{T}(B)
+
+AbstractMatrix(B::BunchKaufman) = B.uplo == 'U' ? B.P'B.U*B.D*B.U'B.P : B.P'B.L*B.D*B.L'B.P
+AbstractArray(B::BunchKaufman) = AbstractMatrix(B)
+Matrix(B::BunchKaufman) = convert(Array, AbstractArray(B))
+Array(B::BunchKaufman) = Matrix(B)
+
 
 size(B::BunchKaufman) = size(getfield(B, :LD))
 size(B::BunchKaufman, d::Integer) = size(getfield(B, :LD), d)
@@ -706,18 +718,20 @@ LD<:AbstractMatrix, ipiv<:AbstractVector{Integer}, info::BlasInt
 
 Computes the Bunch-Kaufman factorization of a symmetric or Hermitian
 matrix `A` of size `NxN` as `P'*U*D*U'*P` or `P'*L*D*L'*P`, depending on
-which triangle is stored in `A`. Note that if `A` is complex symmetric
-then `U'` and `L'` denote the unconjugated transposes, i.e.
-`transpose(U)` and `transpose(L)`. The resulting `U` or `L` and D are
-stored in-place in `A`, LAPACK style. `LD` is just a reference to `A`
-(that is, `LD===A`). `ipiv` stores the permutation information of the
-algorithm in LAPACK format. `info` indicates whether the factorization
-was successful and non-singular when `info==0`, or else `info` takes a
-different value. The outputs `LD`, `ipiv`, `info` follow the format of
-the LAPACK functions of the Bunch-Kaufman factorization (`dsytrf`,
-`csytrf`, `chetrf`, etc.), so this function can (ideally) be used
-interchangeably with its LAPACK counterparts `LAPACK.sytrf!`,
-`LAPACK.sytrf_rook!`, etc.
+which triangle is stored in `A`. Here, `U` and `L` are
+respectively upper and lower triangular, `P` is a permutation matrix,
+and `D` is block diagonal with 1-by-1 and 2-by-2 blocks. Note that if
+`A` is complex symmetric then `U'` and `L'` denote the unconjugated
+transposes, i.e. `transpose(U)` and `transpose(L)`. The resulting `U` or
+`L` and `D` are stored in-place in `A`, LAPACK style. `LD` is just a
+reference to `A` (that is, `LD===A`). `ipiv` stores the permutation
+information of the algorithm in LAPACK format. `info` indicates whether
+the factorization was successful and non-singular when `info==0`, or
+else `info` takes a different value. The outputs `LD`, `ipiv`, `info`
+follow the format of the LAPACK functions of the Bunch-Kaufman
+factorization (`dsytrf`, `csytrf`, `chetrf`, etc.), so this function can
+(ideally) be used interchangeably with its LAPACK counterparts
+`LAPACK.sytrf!`, `LAPACK.sytrf_rook!`, etc.
 
 `uplo` is a character, either `'U'` or `'L'`, indicating whether the
 matrix is stored in the upper triangular part (`uplo=='U'`) or in the
@@ -1327,8 +1341,8 @@ to `0`.
     `rank` by pushing one or more eigenvalues across the threshold. These
     variations can even occur due to changes in floating-point errors between
     different Julia versions, architectures, compilers, or operating systems.
-    In particular, the size of the entries of the tringular factor directly
-    influende the scale of the eigenvalues of the diagonal factor, so it is
+    In particular, the size of the entries of the triangular factor directly
+    influence the scale of the eigenvalues of the diagonal factor, so it is
     strongly recommended to use rook pivoting is the inertia is going to be
     computed.
     On the other hand, if the matrix has rational entries, the inertia
