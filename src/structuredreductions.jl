@@ -97,3 +97,47 @@ for MT in (:Diagonal, :Bidiagonal, :Tridiagonal, :SymTridiagonal)
             _mapreduce_bands(f, op, A, init, inds, Base.mapreduce_pairwise)
     end
 end
+
+# For idempotent operations, duplicated elements cannot affect the result, so these
+# reductions support arbitrary `f` and represent the *entire* zero region by a single
+# `f(diagzero)` whenever the reduced chunk extends beyond the bands. Note that this
+# set must not include non-idempotent operations like `+` (for which the above methods
+# instead rely on the structural zeros being skippable identity elements, and are thus
+# limited to `f = identity`).
+const IdempotentReduceOps = Union{typeof(min), typeof(max), typeof(&), typeof(|), typeof(Base.and_all), typeof(Base.or_any)}
+
+_bandoffsets(::Diagonal) = (0,)
+_bandoffsets(A::Bidiagonal) = A.uplo == 'U' ? (0, 1) : (-1, 0)
+_bandoffsets(::Union{Tridiagonal, SymTridiagonal}) = (-1, 0, 1)
+
+function _mapreduce_bands_withzeros(f, op, A, init, inds::CartesianIndices{2}, red::R) where {R}
+    r = _mapreduce_bands(f, op, A, init, inds, red)
+    is, js = inds.indices
+    nband = 0
+    for k in _bandoffsets(A)
+        nband += length(_bandinds(is, js, k))
+    end
+    if nband < length(inds)
+        # the chunk extends beyond the bands, so it contains at least one structural
+        # zero; with `Number` eltypes every `diagzero` is the same `zero(T)`, so the
+        # corner of maximal |i-j| serves as the representative
+        i0, j0 = last(js) - first(is) >= last(is) - first(js) ?
+            (first(is), last(js)) : (last(is), first(js))
+        r = op(r, f(diagzero(A, i0, j0)))
+    end
+    return r
+end
+
+# These methods are restricted to `Number` eltypes (as the old whole-array
+# `minimum`/`maximum` methods for Diagonal were): with matrix-valued elements,
+# `diagzero`'s shape varies by position, so a single `f(diagzero)` cannot stand in
+# for every structural zero, and for SymTridiagonal `f` would additionally need to
+# commute with the `symmetric`/`transpose` remapping of its band storage.
+for MT in (:(Diagonal{<:Number}), :(Bidiagonal{<:Number}), :(Tridiagonal{<:Number}), :(SymTridiagonal{<:Number}))
+    @eval begin
+        Base.mapreduce_kernel(f, op::IdempotentReduceOps, A::$MT, init, inds::CartesianIndices{2}) =
+            _mapreduce_bands_withzeros(f, op, A, init, inds, Base.mapreduce_kernel)
+        Base.mapreduce_pairwise(f, op::IdempotentReduceOps, A::$MT, init, inds::CartesianIndices{2}) =
+            _mapreduce_bands_withzeros(f, op, A, init, inds, Base.mapreduce_pairwise)
+    end
+end

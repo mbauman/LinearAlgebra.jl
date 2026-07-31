@@ -1612,17 +1612,98 @@ end
     end
 end
 
-@testset "mapreduce kernel" begin
-    for f in (x->rand(x), x->[rand(2, 2) for _ in 1:x],
-              x->rand(ComplexF64, x), x->[rand(ComplexF64, 2, 2) for _ in 1:x],)
-        for A in Any[Diagonal(f(5)), Bidiagonal(f(5), f(4), :U), Bidiagonal(f(5), f(4), :L), Tridiagonal(f(4), f(5), f(4)), SymTridiagonal(f(5), f(4))]
-            for i1 in 1:5, j1 in 1:5
-                for i2 in i1:5, j2 in j1:5
+structured_mats(gen) = Any[Diagonal(gen(5)), Bidiagonal(gen(5), gen(4), :U), Bidiagonal(gen(5), gen(4), :L),
+                           Tridiagonal(gen(4), gen(5), gen(4)), SymTridiagonal(gen(5), gen(4))]
+
+@testset "mapreduce band kernels" begin
+    # Both `Base.mapreduce_kernel` (the reduction leaf) and `Base.mapreduce_pairwise`
+    # (the pre-split interception) must reduce any rectangular chunk of a structured
+    # matrix like the equivalent dense chunk does.
+    @testset "additive ops" begin
+        for gen in (x->rand(x), x->[rand(2, 2) for _ in 1:x],
+                    x->rand(ComplexF64, x), x->[rand(ComplexF64, 2, 2) for _ in 1:x],)
+            for A in structured_mats(gen)
+                for i1 in 1:5, j1 in 1:5, i2 in i1:5, j2 in j1:5
                     CI = CartesianIndices((i1:i2, j1:j2))
-                    @test sum(A[CI]) ≈ sum(@view A[CI]) ≈ Base.mapreduce_kernel(identity, +, A, Base._InitialValue(), CI)
+                    expected = sum(A[CI])
+                    @test expected ≈ sum(@view A[CI])
+                    for op in (+, Base.add_sum), red in (Base.mapreduce_kernel, Base.mapreduce_pairwise)
+                        @test red(identity, op, A, Base._InitialValue(), CI) ≈ expected
+                        # a neutral `init` may be applied to each band segment's chain
+                        eltype(A) <: Number && @test red(identity, op, A, zero(eltype(A)), CI) ≈ expected
+                    end
                 end
             end
         end
+    end
+    @testset "idempotent ops" begin
+        for (gen, ops_fs) in (
+                (x->rand(x) .- 0.5, ((min, identity), (max, identity), (min, abs2), (max, x->-abs(x)))),
+                (x->rand(Int8, x) .% Int8(16), ((|, identity), (&, identity), (min, identity), (max, identity))),
+                (x->rand(Bool, x), ((Base.or_any, identity), (Base.and_all, identity), (|, !), (&, !))),
+            )
+            for A in structured_mats(gen)
+                for i1 in 1:5, j1 in 1:5, i2 in i1:5, j2 in j1:5
+                    CI = CartesianIndices((i1:i2, j1:j2))
+                    for (op, f) in ops_fs, red in (Base.mapreduce_kernel, Base.mapreduce_pairwise)
+                        @test isequal(red(f, op, A, Base._InitialValue(), CI), mapreduce(f, op, A[CI]))
+                    end
+                end
+            end
+        end
+    end
+    @testset "NaN, signed zeros, and the zero-free 1x1 case" begin
+        for A in Any[Diagonal([NaN, 1.0]), Tridiagonal([1.0], [NaN, 2.0], [3.0]), SymTridiagonal([-0.0, -0.0], [-1.0])]
+            M = Matrix(A)
+            @test isequal(maximum(A), maximum(M))
+            @test isequal(minimum(A), minimum(M))
+            @test isequal(minimum(A; dims=1), minimum(M; dims=1))
+        end
+        @test maximum(Diagonal([-3.0])) === -3.0    # no structural zeros in a 1x1
+        @test minimum(Diagonal([3, 4])) === 0
+    end
+end
+
+# these sizes cross the whole-array (32x32) and per-column (1024) pairwise-splitting
+# thresholds, exercising both the direct-kernel and the split-interception paths
+@testset "structured whole-array and dims reductions (n=$n)" for n in (1, 2, 5, 33, 1500)
+    for A in Any[Diagonal(rand(n) .- 0.5),
+                 Bidiagonal(rand(n) .- 0.5, rand(max(n-1,0)) .- 0.5, :U),
+                 Bidiagonal(rand(n) .- 0.5, rand(max(n-1,0)) .- 0.5, :L),
+                 Tridiagonal(rand(max(n-1,0)) .- 0.5, rand(n) .- 0.5, rand(max(n-1,0)) .- 0.5),
+                 SymTridiagonal(rand(n) .- 0.5, rand(max(n-1,0)) .- 0.5)]
+        M = Matrix(A)
+        @test sum(A) ≈ sum(M)
+        @test sum(A; init=0.0) ≈ sum(M)
+        @test sum(A; dims=1) ≈ sum(M; dims=1)
+        @test sum(A; dims=2) ≈ sum(M; dims=2)
+        @test sum(A; dims=(1,2)) ≈ sum(M; dims=(1,2))
+        @test sum!(zeros(1, n), A) ≈ sum(M; dims=1)
+        @test sum!(zeros(n, 1), A) ≈ sum(M; dims=2)
+        @test maximum(A) == maximum(M)
+        @test minimum(A) == minimum(M)
+        @test minimum(A; dims=1) == minimum(M; dims=1)
+        @test maximum(A; dims=2) == maximum(M; dims=2)
+        @test maximum!(fill(-Inf, 1, n), A) == maximum(M; dims=1)
+        @test any(>(0.4), A; dims=2) == any(>(0.4), M; dims=2)
+        @test all(<(0.6), A; dims=1) == all(<(0.6), M; dims=1)
+    end
+end
+
+@testset "empty and single-element structured reductions" begin
+    for A in Any[Diagonal(Float64[]), Bidiagonal(Float64[], Float64[], :U),
+                 Tridiagonal(Float64[], Float64[], Float64[]), SymTridiagonal(Float64[], Float64[])]
+        @test sum(A) === 0.0
+        @test prod(A) === 1.0
+        @test sum(A; dims=1) == zeros(1, 0)
+    end
+    # 1x1 matrices with non-Number eltypes must not reduce their empty off-diagonal bands
+    for A in Any[Diagonal([fill(2.0, 2, 2)]),
+                 Bidiagonal([fill(2.0, 2, 2)], Matrix{Float64}[], :U),
+                 Tridiagonal(Matrix{Float64}[], [fill(2.0, 2, 2)], Matrix{Float64}[]),
+                 SymTridiagonal([fill(2.0, 2, 2)], Matrix{Float64}[])]
+        @test sum(A) == A[1, 1]
+        @test sum(A; dims=1) == fill(A[1, 1], 1, 1)
     end
 end
 
