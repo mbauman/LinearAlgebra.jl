@@ -993,49 +993,6 @@ function SymTridiagonal{T}(M::Tridiagonal) where T
     end
 end
 
-function Base.mapreduce_kernel(f::typeof(identity), op::Union{typeof(+), typeof(Base.add_sum)}, A::Tridiagonal, init, inds::CartesianIndices{2})
-    if inds == CartesianIndices(A)
-        return op(op(mapreduce(f, op, A.du; init), mapreduce(f, op, A.d; init)), mapreduce(f, op, A.dl; init))
-    elseif length(inds) == 1
-        return Base._mapreduce_start(f, op, A, init, A[first(inds)])
-    end
-    is, js = inds.indices
-    # get the diagonal
-    d1, dN = max(first(is), first(js)), min(last(is), last(js))
-    if d1 > dN
-        r = Base._mapreduce_start(f, op, A, init, diagzero(A, first(inds)))
-    else
-        r = Base.mapreduce_kernel(f, op, A.d, init, d1:dN)
-    end
-    # and the off-diagonals
-    u1, uN = max(first(is), first(js)-1), min(last(is), last(js)-1)
-    l1, lN = max(first(is)-1, first(js)), min(last(is)-1, last(js))
-    u1 <= uN && (r = op(r, Base.mapreduce_kernel(f, op, A.du, init, u1:uN)))
-    l1 <= lN && (r = op(r, Base.mapreduce_kernel(f, op, A.dl, init, l1:lN)))
-    return r
-end
-
-function Base.mapreduce_kernel(f::typeof(identity), op::Union{typeof(+), typeof(Base.add_sum)}, A::SymTridiagonal, init, inds::CartesianIndices{2})
-    if inds == CartesianIndices(A)
-        se = A.ev
-        return op(op(symmetric(mapreduce(f, op, A.dv; init), :U), mapreduce(f, op, se; init)), transpose(mapreduce(f, op, se; init)))
-    end
-    is, js = inds.indices
-    # get the diagonal
-    d1, dN = max(first(is), first(js)), min(last(is), last(js))
-    if d1 > dN
-        r = Base._mapreduce_start(f, op, A, init, diagzero(A, first(inds)))
-    else
-        r = symmetric(Base.mapreduce_kernel(f, op, A.dv, init, d1:dN), :U)
-    end
-    # and the off-diagonals
-    u1, uN = max(first(is), first(js)-1), min(last(is), last(js)-1)
-    l1, lN = max(first(is)-1, first(js)), min(last(is)-1, last(js))
-    u1 <= uN && (r = op(r, Base.mapreduce_kernel(f, op, A.ev, init, u1:uN)))
-    l1 <= lN && (r = op(r, transpose(Base.mapreduce_kernel(f, op, A.ev, init, l1:lN))))
-    return r
-end
-
 function dot(x::AbstractVector, A::Tridiagonal, y::AbstractVector)
     require_one_based_indexing(x, y)
     nx, ny = length(x), length(y)
