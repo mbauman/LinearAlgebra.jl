@@ -465,15 +465,19 @@ Broadcast.broadcast_preserving_zero_d(f, tvs::Union{Number,Adjoint{<:Any,<:Trans
 
 ### reductions
 # Whole array reductions can (sometimes) be optimized by using the parent array, but only if the operation is commutative
+# An empty wrapper keeps its own empty value: `mapreduce_empty` special-cases `f` itself
+# (`identity`, `abs`, ...), which the composition with the wrapper's operator would hide.
+_mapreduce_wrapped(f, g, op, A, init) =
+    isempty(A) ? Base._mapreduce_start(f, op, A, init) : Base.mapreducedim(f∘g, op, parent(A), init, :)
 Base.mapreducedim(f, op::CommutativeOps, A::Transpose, init, ::Colon) =
-    Base.mapreducedim(f∘transpose, op, parent(A), init, :)
+    _mapreduce_wrapped(f, transpose, op, A, init)
 Base.mapreducedim(f, op::CommutativeOps, A::Adjoint, init, ::Colon) =
-    Base.mapreducedim(f∘adjoint, op, parent(A), init, :)
+    _mapreduce_wrapped(f, adjoint, op, A, init)
 # in prod, use fast path only in the commutative case to avoid surprises
 Base.mapreducedim(f::typeof(identity), op::Union{typeof(*),typeof(Base.mul_prod)}, A::Transpose{<:Union{Real,Complex}}, init, ::Colon) =
-    Base.mapreducedim(f∘transpose, op, parent(A), init, :)
+    _mapreduce_wrapped(f, transpose, op, A, init)
 Base.mapreducedim(f::typeof(identity), op::Union{typeof(*),typeof(Base.mul_prod)}, A::Adjoint{<:Union{Real,Complex}}, init, ::Colon) =
-    Base.mapreducedim(f∘adjoint, op, parent(A), init, :)
+    _mapreduce_wrapped(f, adjoint, op, A, init)
 # count allows for optimization only if the parent array has Bool eltype
 Base._count(::typeof(identity), A::Transpose{Bool}, ::Colon, init) = Base._count(identity, parent(A), :, init)
 Base._count(::typeof(identity), A::Adjoint{Bool}, ::Colon, init) = Base._count(identity, parent(A), :, init)
@@ -482,14 +486,20 @@ Base._any(f, A::Adjoint, ::Colon) = Base._any(f∘adjoint, parent(A), :)
 Base._all(f, A::Transpose, ::Colon) = Base._all(f∘transpose, parent(A), :)
 Base._all(f, A::Adjoint, ::Colon) = Base._all(f∘adjoint, parent(A), :)
 # In-place dimensional reductions can similarly be optimized, but we must also swap the leading 2 dimensions of the output array
+# An empty wrapper reduces as its (empty) copy, keeping the empty value of `f` itself.
+function _mapreduce_wrapped!(f, g, op, B, A, init, update)
+    isempty(A) && return Base.mapreduce!(f, op, B, copy(A); init, update)
+    Base.mapreduce!(f∘g, op, switch_dim12(B), parent(A); init, update)
+    return B
+end
 Base.mapreduce!(f, op::CommutativeOps, B::AbstractArray, A::TransposeAbsMat; init=Base._InitialValue(), update::Bool=false) =
-    (Base.mapreduce!(f∘transpose, op, switch_dim12(B), parent(A); init, update); B)
+    _mapreduce_wrapped!(f, transpose, op, B, A, init, update)
 Base.mapreduce!(f, op::CommutativeOps, B::AbstractArray, A::AdjointAbsMat; init=Base._InitialValue(), update::Bool=false) =
-    (Base.mapreduce!(f∘adjoint, op, switch_dim12(B), parent(A); init, update); B)
+    _mapreduce_wrapped!(f, adjoint, op, B, A, init, update)
 Base.mapreduce!(f::typeof(identity), op::Union{typeof(*),typeof(Base.mul_prod)}, B::AbstractArray, A::TransposeAbsMat{<:Union{Real,Complex}}; init=Base._InitialValue(), update::Bool=false) =
-    (Base.mapreduce!(f∘transpose, op, switch_dim12(B), parent(A); init, update); B)
+    _mapreduce_wrapped!(f, transpose, op, B, A, init, update)
 Base.mapreduce!(f::typeof(identity), op::Union{typeof(*),typeof(Base.mul_prod)}, B::AbstractArray, A::AdjointAbsMat{<:Union{Real,Complex}}; init=Base._InitialValue(), update::Bool=false) =
-    (Base.mapreduce!(f∘adjoint, op, switch_dim12(B), parent(A); init, update); B)
+    _mapreduce_wrapped!(f, adjoint, op, B, A, init, update)
 
 switch_dim12(B::AbstractVector) = permutedims(B)
 switch_dim12(B::AbstractVector{<:Number}) = transpose(B) # avoid allocs due to permutedims

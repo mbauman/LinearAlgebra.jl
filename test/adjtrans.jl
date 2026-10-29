@@ -908,4 +908,19 @@ end
     end
 end
 
+@testset "reductions of empty adjoints and transposes keep the empty value" begin
+    for wrap in (adjoint, transpose)
+        @test sum(wrap(zeros(1, 0))) === 0.0
+        @test prod(wrap(zeros(1, 0))) === 1.0
+        @test maximum(abs2, wrap(zeros(Int, 0, 0))) === 0
+        @test sum(wrap(zeros(Int, 0))) === 0
+        @test sum(abs, wrap(ComplexF64[])) === 0.0
+        @test_throws ArgumentError maximum(wrap(zeros(0, 2)))
+        @test sum!(ones(3, 1), wrap(zeros(0, 3))) == zeros(3, 1)
+        @test sum!(ones(3, 1), wrap(zeros(0, 3)); init=false) == ones(3, 1)
+        @test prod!(ones(3, 1), wrap(zeros(0, 3))) == ones(3, 1)
+        @test sum(wrap(zeros(0, 3)); dims=2) == zeros(3, 1)
+    end
+end
+
 end # module TestAdjointTranspose
